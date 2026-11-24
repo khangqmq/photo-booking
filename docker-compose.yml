@@ -1,0 +1,11 @@
+services:
+  db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Quockh@ng0610"
+      MSSQL_PID: Developer
+    ports: ["1434:1433"]
+    volumes: [sqldata:/var/opt/mssql]
+volumes:
+  sqldata:
