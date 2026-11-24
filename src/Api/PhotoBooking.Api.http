@@ -1,4 +1,4 @@
-@PhotoBooking.Api_HostAddress = http://localhost:5265
+@PhotoBooking.Api_HostAddress = http://localhost:5191
 
 GET {{PhotoBooking.Api_HostAddress}}/weatherforecast/
 Accept: application/json
