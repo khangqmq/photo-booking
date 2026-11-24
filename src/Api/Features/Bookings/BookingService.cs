@@ -6,18 +6,18 @@ public record CreateBookingRequest(
     int ServiceId, DateTime StartUtc,
     string CustomerName, string CustomerEmail, string CustomerPhone, string? Note);
 
-public class BookingService(AppDbContext db, AvailabilityService availability, TimeProvider clock)
+public class BookingService(AppDbContext db, AvailabilityService availability, TimeProvider clock, IConfiguration config)
 {
     public const string NotFound = "NOT_FOUND";
     static readonly TimeZoneInfo Vn = TimeZoneInfo.FindSystemTimeZoneById("Asia/Ho_Chi_Minh");
-    static string BuildConfirmationBody(Booking b, Service s)
+    string BuildConfirmationBody(Booking b, Service s)
     {
-        var local = TimeZoneInfo.ConvertTimeFromUtc(b.StartUtc, Vn);
+        var baseUrl = (config["App:PublicBaseUrl"] ?? "").TrimEnd('/');
         return $"""
         Xin chào {b.CustomerName},
 
-        Bạn đã đặt lịch "{s.Name}" lúc {local:HH:mm dd/MM/yyyy} (giờ Việt Nam).
-        Mã quản lý lịch của bạn: {b.ManageToken}
+        Bạn đã đặt lịch "{s.Name}" lúc {Local(b.StartUtc)} (giờ Việt Nam).
+        Xem hoặc hủy lịch tại: {baseUrl}/manage/{b.ManageToken}
         """;
     }
     public async Task<Result<Booking>> CreateAsync(

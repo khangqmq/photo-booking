@@ -61,6 +61,10 @@ builder.Services.AddRateLimiter(o =>
             Window = TimeSpan.FromMinutes(1),
         }));
 });
+builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection("Email"));
+builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
+builder.Services.AddHostedService<EmailWorker>();
+builder.Services.AddHostedService<ReminderWorker>();
 
 var app = builder.Build();
 

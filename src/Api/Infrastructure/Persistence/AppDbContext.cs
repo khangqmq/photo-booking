@@ -12,7 +12,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Booking> Bookings => Set<Booking>();
     public DbSet<BookingSlot> BookingSlots => Set<BookingSlot>();
     public DbSet<EmailOutbox> EmailOutbox => Set<EmailOutbox>();
- 
+
     protected override void OnModelCreating(ModelBuilder b)
     {
         base.OnModelCreating(b);
@@ -33,7 +33,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
                 .HasForeignKey(x => x.BookingId).OnDelete(DeleteBehavior.Cascade);
         });
     }
- 
+
     // SQL Server không lưu Kind: ép mọi DateTime đọc từ DB về là UTC
     protected override void ConfigureConventions(ModelConfigurationBuilder c)
     {
@@ -41,9 +41,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
         c.Properties<DateTime?>().HaveConversion<NullableUtcConverter>();
     }
 }
- 
+
 public class UtcConverter() : ValueConverter<DateTime, DateTime>(
     v => v, v => DateTime.SpecifyKind(v, DateTimeKind.Utc));
- 
+
 public class NullableUtcConverter() : ValueConverter<DateTime?, DateTime?>(
     v => v, v => v.HasValue ? DateTime.SpecifyKind(v.Value, DateTimeKind.Utc) : v);
