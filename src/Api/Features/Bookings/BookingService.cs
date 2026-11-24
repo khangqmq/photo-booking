@@ -91,4 +91,64 @@ public class BookingService(AppDbContext db, AvailabilityService availability, T
         return Result<Booking>.Ok(booking);
     }
 
+    public const string Conflict = "CONFLICT";
+
+    static string Local(DateTime utc) =>
+        TimeZoneInfo.ConvertTimeFromUtc(utc, Vn).ToString("HH:mm dd/MM/yyyy");
+
+    bool ApplyVersion(Booking b, string? version)
+    {
+        if (string.IsNullOrEmpty(version)) return true;
+        try
+        {
+            db.Entry(b).Property(x => x.Version).OriginalValue = Convert.FromBase64String(version);
+            return true;
+        }
+        catch (FormatException) { return false; }
+    }
+
+    async Task<Result<Booking>> SaveAsync(Booking b, CancellationToken ct)
+    {
+        try { await db.SaveChangesAsync(ct); return Result<Booking>.Ok(b); }
+        catch (DbUpdateConcurrencyException) { return Result<Booking>.Fail(Conflict); }
+    }
+
+    public async Task<Result<Booking>> ConfirmAsync(Guid id, string? version, CancellationToken ct)
+    {
+        var b = await db.Bookings.Include(x => x.Service).FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (b is null) return Result<Booking>.Fail(NotFound);
+        if (b.Status != BookingStatus.Pending)
+            return Result<Booking>.Fail("Chỉ xác nhận được đơn đang chờ duyệt");
+        if (!ApplyVersion(b, version)) return Result<Booking>.Fail("Version không hợp lệ");
+
+        b.Status = BookingStatus.Confirmed;
+        db.EmailOutbox.Add(new EmailOutbox
+        {
+            To = b.CustomerEmail,
+            Subject = "Lịch chụp đã được xác nhận",
+            Body = $"Lịch chụp \"{b.Service.Name}\" lúc {Local(b.StartUtc)} đã được xác nhận.",
+        });
+        return await SaveAsync(b, ct);
+    }
+
+    public async Task<Result<Booking>> AdminCancelAsync(
+        Guid id, string? version, string? reason, CancellationToken ct)
+    {
+        var b = await db.Bookings.Include(x => x.Slots).FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (b is null) return Result<Booking>.Fail(NotFound);
+        if (b.Status is BookingStatus.Cancelled or BookingStatus.Completed)
+            return Result<Booking>.Fail("Đơn này không thể hủy");
+        if (!ApplyVersion(b, version)) return Result<Booking>.Fail("Version không hợp lệ");
+
+        b.Status = BookingStatus.Cancelled;
+        db.BookingSlots.RemoveRange(b.Slots);   // nhả khung giờ
+        db.EmailOutbox.Add(new EmailOutbox
+        {
+            To = b.CustomerEmail,
+            Subject = "Lịch chụp đã bị hủy",
+            Body = $"Lịch chụp lúc {Local(b.StartUtc)} đã bị hủy."
+                 + (string.IsNullOrWhiteSpace(reason) ? "" : $" Lý do: {reason}"),
+        });
+        return await SaveAsync(b, ct);
+    }
 }

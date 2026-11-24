@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Scalar.AspNetCore;
 using Serilog;
+using Microsoft.AspNetCore.Identity;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,7 +20,28 @@ builder.Services.AddDbContext<AppDbContext>(o =>
     o.UseSqlServer(builder.Configuration.GetConnectionString("Default")));
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<AppDbContext>(tags: ["ready"]);
-
+builder.Services.AddIdentityCore<IdentityUser>(o =>
+    {
+        o.Password.RequiredLength = 12;
+        o.Lockout.MaxFailedAccessAttempts = 5;
+    })
+    .AddRoles<IdentityRole>()
+    .AddEntityFrameworkStores<AppDbContext>()
+    .AddSignInManager();
+builder.Services.AddAuthentication(IdentityConstants.ApplicationScheme)
+    .AddIdentityCookies();
+builder.Services.ConfigureApplicationCookie(o =>
+{
+    o.Cookie.HttpOnly = true;
+    o.Cookie.SameSite = SameSiteMode.Lax;
+    o.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
+        ? CookieSecurePolicy.SameAsRequest : CookieSecurePolicy.Always;
+    o.ExpireTimeSpan = TimeSpan.FromHours(8);
+    o.Events.OnRedirectToLogin = c => { c.Response.StatusCode = 401; return Task.CompletedTask; };
+    o.Events.OnRedirectToAccessDenied = c => { c.Response.StatusCode = 403; return Task.CompletedTask; };
+});
+builder.Services.AddAuthorizationBuilder()
+    .AddPolicy("Admin", p => p.RequireRole("Admin"));
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<AvailabilityService>();
 builder.Services.AddScoped<BookingService>();
@@ -35,7 +57,8 @@ builder.Services.AddRateLimiter(o =>
         ctx.Connection.RemoteIpAddress?.ToString() ?? "anon",
         _ => new FixedWindowRateLimiterOptions
         {
-            PermitLimit = 5, Window = TimeSpan.FromMinutes(1),
+            PermitLimit = 5,
+            Window = TimeSpan.FromMinutes(1),
         }));
 });
 
@@ -43,6 +66,8 @@ var app = builder.Build();
 
 app.UseExceptionHandler();
 app.UseSerilogRequestLogging();
+app.UseAuthentication();
+app.UseAuthorization();
 app.UseCors("web");
 app.UseRateLimiter();
 
@@ -55,6 +80,9 @@ app.MapHealthChecks("/health/live", new() { Predicate = _ => false });
 app.MapHealthChecks("/health/ready", new() { Predicate = r => r.Tags.Contains("ready") });
 
 var api = app.MapGroup("/api");
+
+app.MapAuthEndpoints();
+app.MapAdminEndpoints();
 
 api.MapGet("/services", async (AppDbContext db, CancellationToken ct) =>
     TypedResults.Ok(await db.Services.AsNoTracking()
@@ -98,12 +126,16 @@ api.MapPost("/bookings/manage/{token}/cancel",
     })
     .RequireRateLimiting("booking");
 
-if (app.Environment.IsDevelopment())
+using (var scope = app.Services.CreateScope())
 {
-    using var scope = app.Services.CreateScope();
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    await db.Database.MigrateAsync();
-    await DbSeeder.SeedAsync(db);
+    var sp = scope.ServiceProvider;
+    if (app.Environment.IsDevelopment())
+    {
+        var db = sp.GetRequiredService<AppDbContext>();
+        await db.Database.MigrateAsync();
+        await DbSeeder.SeedAsync(db);
+    }
+    await AdminSeeder.SeedAsync(sp, app.Configuration);
 }
 
 app.Run();
